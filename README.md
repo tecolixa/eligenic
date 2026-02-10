@@ -1,4 +1,4 @@
-# Eligenic (Experimental Prototype)
+# Eligenic
 
 **Eligenic** is an experimental, pluggable Agentic framework for Elixir and Phoenix.
 
