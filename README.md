@@ -122,7 +122,7 @@ config :eligenic,
 
 ## Contributing
 
-Eligenic is developed by [Apporay](https://github.com/apporay). Contributions are welcome!
+Eligenic is developed by [Tecolixa](https://github.com/tecolixa). Contributions are welcome!
 
 ## License
 

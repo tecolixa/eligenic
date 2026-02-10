@@ -39,7 +39,7 @@ defmodule Eligenic.MixProject do
     [
       name: "eligenic",
       licenses: ["Apache-2.0"],
-      links: %{"GitHub" => "https://github.com/apporay/eligenic"}
+      links: %{"GitHub" => "https://github.com/tecolixa/eligenic"}
     ]
   end
 
