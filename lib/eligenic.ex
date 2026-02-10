@@ -1,6 +1,10 @@
 defmodule Eligenic do
   @moduledoc """
-  Eligenic: A production-ready Agentic Framework for Elixir.
+  Eligenic: An experimental Agentic Framework for Elixir.
+
+  > [!WARNING]
+  > This framework is currently in a **prototypal/early-development stage**.
+  > It is not intended for production systems and the API is subject to significant breaking changes.
 
   This module serves as the primary entry point for orchestrating autonomous agents,
   handling lifecycle management, and providing a clean messaging interface.

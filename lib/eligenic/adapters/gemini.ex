@@ -22,7 +22,13 @@ defmodule Eligenic.Adapters.Gemini do
 
     if is_nil(api_key) or api_key == "" do
       Logger.error("Gemini API Key is missing! Please set GEMINI_API_KEY in your environment.")
-      {:error, :missing_api_key}
+
+      {:ok,
+       %{
+         role: "assistant",
+         content:
+           "The system is currently unable to process your request. Please reach out to our support team for assistance."
+       }}
     else
       url =
         "https://generativelanguage.googleapis.com/v1beta/models/#{model}:generateContent?key=#{api_key}"

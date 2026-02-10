@@ -6,6 +6,7 @@ defmodule EligenicAppWeb.AgentLive do
   # 🏔️ Lifecycle: Mount & Initialization
   # -----------------------------------------------------------------------------
 
+  @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
       # Fetch localized agent configuration
@@ -176,7 +177,7 @@ defmodule EligenicAppWeb.AgentLive do
             </div>
             <div class="hidden sm:block">
               <span class="badge badge-outline border-base-300 opacity-40 text-[9px] font-black tracking-widest uppercase">
-                v0.8.5-BETA
+                v0.1.0-PROTOTYPE
               </span>
             </div>
           </header>
@@ -397,10 +398,10 @@ defmodule EligenicAppWeb.AgentLive do
   end
 
   @impl true
-  def handle_info({:agent_response, {:error, reason}}, socket) do
+  def handle_info({:agent_response, {:error, _reason}}, socket) do
     {:noreply,
      socket
-     |> put_flash(:error, "Agent Node Error: #{inspect(reason)}")
+     |> put_flash(:error, "Agent Node Error: \#{inspect(_reason)}")
      |> assign(status: :idle)}
   end
 end

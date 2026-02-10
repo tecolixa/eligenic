@@ -1,14 +1,16 @@
-# Eligenic
+# Eligenic (Experimental Prototype)
 
-**Eligenic** is a pluggable, highly configurable Agentic framework for Elixir and Phoenix.
+**Eligenic** is an experimental, pluggable Agentic framework for Elixir and Phoenix.
 
-It allows you to turn your existing business logic into AI-callable tools with zero boilerplate, while providing robust security, memory, and evaluation infrastructure.
+> [!WARNING]
+> **Status: Early Development.** 
+> This framework is currently a prototype. APIs are subject to change, and it is not yet intended for production use.
 
 ## Key Features
 
 - **Zero-Boilerplate Introspection**: Automatically turn your existing Elixir functions into AI tools using `@doc` and typespecs.
 - **Pluggable Architecture**: Bring your own storage (Ecto, Redis), security policies, and telemetry.
-- **Production Ready**: Built-in support for PII redaction, tool-level authorization, and systematic evaluations.
+- **Neural Orchestration**: Prototypal support for PII redaction, tool-level authorization, and systematic evaluations.
 - **Multi-LLM Support**: Unified adapter interface for Gemini, OpenAI, Anthropic, and more.
 
 ## Project Structure
@@ -17,7 +19,7 @@ Eligenic is organized as a clean, standalone library with a reference implementa
 
 - `lib/`: The core framework source code.
 - `test/`: Comprehensive test suite for the core library.
-- `examples/eligenic_app`: A standalone Phoenix application demonstrating production-grade integration.
+- `examples/eligenic_app`: A standalone Phoenix application demonstrating proof-of-concept integration.
 
 ## Running the Application
 
