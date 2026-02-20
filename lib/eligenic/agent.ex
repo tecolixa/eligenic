@@ -6,29 +6,45 @@ defmodule Eligenic.Agent do
   require Logger
 
   # -----------------------------------------------------------------------------
-  # 🌐 Public API
+  # Struct Definition
+  # -----------------------------------------------------------------------------
+
+  defstruct [
+    :id,
+    :identity,
+    :adapter,
+    history: [],
+    skills: [],
+    tools: [],
+    adapter_opts: [],
+    broker: Eligenic.Broker.PG,
+    memory: Eligenic.Memory.ETS,
+    runtime: Eligenic.Runtime.Local,
+    security: Eligenic.Security.Default,
+    security_settings: [],
+    instrumentation: [enabled: false],
+    status: :idle,
+    max_iterations: 10
+  ]
+
+  # -----------------------------------------------------------------------------
+  # Public API
   # -----------------------------------------------------------------------------
 
   @doc """
   Starts an agent process with the given options.
   """
   def start_link(opts) do
-    id = opts[:id]
-    {name, opts} = Keyword.pop(opts, :name)
+    # Require an Identity to be passed to start the process (or generate a UUID default)
+    identity = Eligenic.Identity.from_opts(opts)
 
-    # Naming strategy: use explicit name, or via registry if ID is present
-    name =
-      cond do
-        name -> name
-        id -> {:via, Registry, {Eligenic.AgentRegistry, id}}
-        true -> nil
-      end
+    # Let the user explicitly pass a native name tuple if they want,
+    # otherwise register the process name globally using the Identity's ID.
+    name = Keyword.get(opts, :name, {:via, Registry, {Eligenic.AgentRegistry, identity.id}})
 
-    if name do
-      GenServer.start_link(__MODULE__, opts, name: name)
-    else
-      GenServer.start_link(__MODULE__, opts)
-    end
+    # Start the server, forcefully cascading the strictly resolved identity
+    opts = Keyword.put(opts, :identity, identity)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   @doc """
@@ -46,100 +62,108 @@ defmodule Eligenic.Agent do
   end
 
   # -----------------------------------------------------------------------------
-  # ⚙️ GenServer Callbacks
+  # GenServer Callbacks
   # -----------------------------------------------------------------------------
 
   @impl true
   def init(opts) do
-    id = opts[:id]
-    identity = opts[:identity] || Eligenic.Identity.generate_default()
-    identity = if id, do: %{identity | id: id}, else: identity
+    agent = define_agent(opts)
 
-    id = identity.id
-    Logger.info("Initializing Agent #{id} (Process: #{inspect(self())})")
-
-    skills = opts[:skills] || []
-    tools = opts[:tools] || Enum.flat_map(skills, &(&1.tools() || []))
-
-    # Collect adapter-specific options
-    adapter_opts = Keyword.take(opts, [:api_key, :model])
-
-    state = %{
-      id: id,
-      identity: identity,
-      history: [],
-      skills: skills,
-      tools: tools,
-      adapter: opts[:adapter] || Application.get_env(:eligenic, :llm_adapter),
-      adapter_opts: adapter_opts,
-      memory: opts[:memory] || Eligenic.Memory.ETS,
-      security: opts[:security] || Eligenic.Security.Default,
-      security_settings: opts[:security_settings] || [],
-      instrumentation: opts[:instrumentation] || [enabled: false]
-    }
+    Logger.info("Initializing Agent #{agent.id} (Process: #{inspect(self())})")
 
     # Load history from memory
-    case state.memory.get_history(state.id) do
+    case agent.memory.get_history(agent.id) do
       {:ok, history} ->
-        {:ok, %{state | history: history}}
+        {:ok, %{agent | history: history}}
 
       {:error, reason} ->
-        Logger.error("Failed to load history for Agent #{id}: #{inspect(reason)}")
+        Logger.error("Failed to load history for Agent #{agent.id}: #{inspect(reason)}")
         {:stop, reason}
     end
   end
 
+  # -----------------------------------------------------------------------------
+  # GenServer Callbacks: Messaging
+  # -----------------------------------------------------------------------------
+
   @impl true
-  def handle_call(:get_history, _from, state) do
-    {:reply, {:ok, state.history}, state}
+  def handle_call(:get_history, _from, agent) do
+    {:reply, {:ok, agent.history}, agent}
   end
 
   @impl true
-  def handle_call({:call, message}, _from, state) do
+  def handle_call({:call, message}, from, %__MODULE__{status: :idle} = agent) do
     # Redact input and store in memory
-    redacted_message = state.security.redact(message)
+    redacted_message = agent.security.redact(message)
     event = %{role: "user", content: redacted_message, timestamp: DateTime.utc_now()}
-    state.memory.store_event(state.id, event)
+    agent.memory.store_event(agent.id, event)
 
-    new_history = state.history ++ [event]
+    new_history = agent.history ++ [event]
 
-    case run_loop(new_history, state) do
+    task =
+      agent.runtime.spawn_reasoning_loop(fn ->
+        run_loop(new_history, agent, 0)
+      end)
+
+    {:noreply, %{agent | status: {:busy, from, task.ref}, history: new_history}}
+  end
+
+  def handle_call({:call, _message}, _from, agent) do
+    {:reply, {:error, :busy}, agent}
+  end
+
+  @impl true
+  def handle_info({ref, result}, %__MODULE__{status: {:busy, from, ref}} = agent) do
+    Process.demonitor(ref, [:flush])
+
+    case result do
       {:ok, final_message, final_history} ->
-        {:reply, {:ok, final_message}, %{state | history: final_history}}
+        GenServer.reply(from, {:ok, final_message})
+        {:noreply, %{agent | status: :idle, history: final_history}}
 
       {:error, reason} ->
-        {:reply, {:error, reason}, state}
+        GenServer.reply(from, {:error, reason})
+        {:noreply, %{agent | status: :idle}}
     end
   end
 
+  def handle_info(
+        {:DOWN, ref, :process, _pid, reason},
+        %__MODULE__{status: {:busy, from, ref}} = agent
+      ) do
+    GenServer.reply(from, {:error, {:task_crashed, reason}})
+    {:noreply, %{agent | status: :idle}}
+  end
+
   # -----------------------------------------------------------------------------
-  # 🧠 Reasoning Loop
+  # Reasoning Loop
   # -----------------------------------------------------------------------------
 
-  defp run_loop(history, state) do
-    # Filter tools based on security policy
-    authorized_tools =
-      Enum.filter(state.tools, fn tool ->
-        match?(:ok, state.security.authorize(state.identity, tool, %{}))
-      end)
+  defp run_loop(_history, agent, iteration) when iteration >= agent.max_iterations do
+    {:error, :max_iterations_reached}
+  end
 
-    completion_opts = Keyword.put(state.adapter_opts, :tools, authorized_tools)
+  defp run_loop(history, agent, iteration) do
+    completion_opts =
+      agent.adapter_opts
+      |> Keyword.put(:tools, agent.tools)
+      |> Keyword.put(:agent_id, agent.id)
 
     # Inject persona into history if defined and not already present
-    history_for_llm = inject_persona(history, state.identity)
+    history_for_llm = inject_persona(history, agent.identity)
 
-    case state.adapter.chat_completion(history_for_llm, completion_opts) do
+    case agent.adapter.chat_completion(history_for_llm, completion_opts) do
       {:ok, %{tool_calls: tool_calls} = resp} when not is_nil(tool_calls) ->
-        results = handle_tool_calls(tool_calls, state)
+        results = Eligenic.Executor.execute_tools(tool_calls, agent)
         new_history = history ++ [resp] ++ results
 
         # Store events in permanent memory memory
-        Enum.each([resp | results], &state.memory.store_event(state.id, &1))
+        Enum.each([resp | results], &agent.memory.store_event(agent.id, &1))
 
-        run_loop(new_history, state)
+        run_loop(new_history, agent, iteration + 1)
 
       {:ok, %{content: content} = resp} ->
-        state.memory.store_event(state.id, resp)
+        agent.memory.store_event(agent.id, resp)
         {:ok, content, history ++ [resp]}
 
       {:error, reason} ->
@@ -148,36 +172,33 @@ defmodule Eligenic.Agent do
   end
 
   # -----------------------------------------------------------------------------
-  # 🛠️ Tool Execution
+  # Internal Data Builders
   # -----------------------------------------------------------------------------
 
-  defp handle_tool_calls(calls, state) do
-    Enum.map(calls, fn call ->
-      case state.security.authorize(state.identity, call.function, call.function.arguments) do
-        :ok ->
-          # Find the skill module that encapsulates this tool
-          skill =
-            Enum.find(state.skills, fn s ->
-              Enum.any?(s.tools(), &(&1.function.name == call.function.name))
-            end)
+  defp define_agent(opts) do
+    # Strictly rely on the Identity struct passed by start_link
+    identity = opts[:identity]
 
-          content =
-            if skill do
-              skill.execute(call.function.name, call.function.arguments)
-            else
-              "Error: Tool not found"
-            end
+    skills = opts[:skills] || []
+    tools = opts[:tools] || Enum.flat_map(skills, &(&1.tools() || []))
+    adapter_opts = Keyword.take(opts, [:api_key, :model])
 
-          %{role: "tool", tool_call_id: call.id, content: content}
+    overrides = %{
+      id: identity.id,
+      identity: identity,
+      skills: skills,
+      tools: tools,
+      adapter: opts[:adapter] || Application.get_env(:eligenic, :llm_adapter),
+      adapter_opts: adapter_opts
+    }
 
-        {:error, reason} ->
-          %{role: "tool", tool_call_id: call.id, content: "Error: #{reason}"}
-      end
-    end)
+    __MODULE__
+    |> struct(opts)
+    |> struct(overrides)
   end
 
   # -----------------------------------------------------------------------------
-  # 🎭 Persona Injection
+  # Persona Injection
   # -----------------------------------------------------------------------------
 
   defp inject_persona(history, %Eligenic.Identity{persona: persona}) when is_binary(persona) do

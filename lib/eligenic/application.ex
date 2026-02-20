@@ -20,7 +20,16 @@ defmodule Eligenic.Application do
       {Registry, keys: :unique, name: Eligenic.AgentRegistry},
 
       # Dynamic supervisor for managing individual agent processes
-      {DynamicSupervisor, name: Eligenic.AgentSupervisor, strategy: :one_for_one}
+      {DynamicSupervisor, name: Eligenic.AgentSupervisor, strategy: :one_for_one},
+
+      # Native Erlang Process Group scopes for Eligenic.Broker.PG swarms
+      %{
+        id: :eligenic_broker_scope,
+        start: {:pg, :start_link, [:eligenic_broker_scope]}
+      },
+
+      # Task supervisor for concurrent, isolated agent tasks
+      {PartitionSupervisor, child_spec: Task.Supervisor, name: Eligenic.TaskSupervisors}
     ]
 
     opts = [strategy: :one_for_one, name: Eligenic.Supervisor]

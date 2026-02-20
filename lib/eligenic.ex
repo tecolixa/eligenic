@@ -18,9 +18,11 @@ defmodule Eligenic do
   Returns a child specification for starting an agent in a static supervision tree.
   """
   def child_spec(opts) do
+    identity = Eligenic.Identity.from_opts(opts)
+
     %{
-      id: opts[:id] || Eligenic.Agent,
-      start: {Eligenic.Agent, :start_link, [opts]},
+      id: identity.id,
+      start: {Eligenic.Agent, :start_link, [Keyword.put(opts, :identity, identity)]},
       type: :worker,
       restart: :permanent
     }
@@ -57,7 +59,8 @@ defmodule Eligenic do
         {:ok, pid}
 
       {:error, :not_found} ->
-        opts = Keyword.put(opts, :id, id)
+        identity = Eligenic.Identity.from_opts(opts, id)
+        opts = Keyword.put(opts, :identity, identity)
 
         case start_agent(opts) do
           {:ok, pid} -> {:ok, pid}

@@ -19,6 +19,7 @@ defmodule Eligenic.Adapters.Gemini do
         Application.get_env(:eligenic, :gemini_model, "gemini-1.5-flash")
 
     tools = Keyword.get(opts, :tools, [])
+    agent_id = Keyword.get(opts, :agent_id, "unknown")
 
     if is_nil(api_key) or api_key == "" do
       Logger.error("Gemini API Key is missing! Please set GEMINI_API_KEY in your environment.")
@@ -38,9 +39,16 @@ defmodule Eligenic.Adapters.Gemini do
         tools: format_tools(tools)
       }
 
-      case Req.post(url, json: body) do
+      start_time = System.monotonic_time()
+
+      case Req.post(url, json: body, receive_timeout: 60_000) do
         {:ok, %Req.Response{status: 200, body: body}} ->
+          duration_ms =
+            System.convert_time_unit(System.monotonic_time() - start_time, :native, :millisecond)
+
+          Eligenic.Instrumentation.report_completion(agent_id, model, duration_ms)
           Logger.debug("Gemini API raw response: #{inspect(body)}")
+
           parse_response(body)
 
         {:ok, %Req.Response{status: status, body: body} = resp} ->

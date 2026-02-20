@@ -38,4 +38,19 @@ defmodule Eligenic.Identity do
       id: "agent_#{:erlang.unique_integer([:positive])}"
     }
   end
+
+  @doc """
+  Resolves an Identity struct from a keyword list of options.
+  If an `:identity` struct exists in `opts`, it is returned.
+  If a `fallback_id` is provided, a fresh Identity is generated using it.
+  Otherwise, a random default identity is generated.
+  """
+  @spec from_opts(keyword(), String.t() | nil) :: t()
+  def from_opts(opts, fallback_id \\ nil) do
+    cond do
+      identity = opts[:identity] -> identity
+      fallback_id != nil -> %__MODULE__{id: fallback_id}
+      true -> generate_default()
+    end
+  end
 end
