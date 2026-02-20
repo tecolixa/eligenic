@@ -51,7 +51,11 @@ defmodule Eligenic.Agent do
 
   @impl true
   def init(opts) do
-    id = opts[:id] || "agent_#{:erlang.unique_integer([:positive])}"
+    id = opts[:id]
+    identity = opts[:identity] || Eligenic.Identity.generate_default()
+    identity = if id, do: %{identity | id: id}, else: identity
+
+    id = identity.id
     Logger.info("Initializing Agent #{id} (Process: #{inspect(self())})")
 
     skills = opts[:skills] || []
@@ -62,6 +66,7 @@ defmodule Eligenic.Agent do
 
     state = %{
       id: id,
+      identity: identity,
       history: [],
       skills: skills,
       tools: tools,
@@ -115,12 +120,15 @@ defmodule Eligenic.Agent do
     # Filter tools based on security policy
     authorized_tools =
       Enum.filter(state.tools, fn tool ->
-        match?(:ok, state.security.authorize(state, tool, %{}))
+        match?(:ok, state.security.authorize(state.identity, tool, %{}))
       end)
 
     completion_opts = Keyword.put(state.adapter_opts, :tools, authorized_tools)
 
-    case state.adapter.chat_completion(history, completion_opts) do
+    # Inject persona into history if defined and not already present
+    history_for_llm = inject_persona(history, state.identity)
+
+    case state.adapter.chat_completion(history_for_llm, completion_opts) do
       {:ok, %{tool_calls: tool_calls} = resp} when not is_nil(tool_calls) ->
         results = handle_tool_calls(tool_calls, state)
         new_history = history ++ [resp] ++ results
@@ -145,7 +153,7 @@ defmodule Eligenic.Agent do
 
   defp handle_tool_calls(calls, state) do
     Enum.map(calls, fn call ->
-      case state.security.authorize(state, call.function, call.function.arguments) do
+      case state.security.authorize(state.identity, call.function, call.function.arguments) do
         :ok ->
           # Find the skill module that encapsulates this tool
           skill =
@@ -167,4 +175,18 @@ defmodule Eligenic.Agent do
       end
     end)
   end
+
+  # -----------------------------------------------------------------------------
+  # 🎭 Persona Injection
+  # -----------------------------------------------------------------------------
+
+  defp inject_persona(history, %Eligenic.Identity{persona: persona}) when is_binary(persona) do
+    # Check if the first message is already a system prompt
+    case history do
+      [%{role: "system"} | _] -> history
+      _ -> [%{role: "system", content: persona} | history]
+    end
+  end
+
+  defp inject_persona(history, _identity), do: history
 end

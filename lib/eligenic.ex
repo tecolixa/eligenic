@@ -32,6 +32,7 @@ defmodule Eligenic do
 
   @doc """
   Starts a new agent dynamically in the Eligenic Agent Supervisor.
+  Can optionally accept an `:identity` struct to define persona and claims.
   """
   def start_agent(opts \\ []) do
     DynamicSupervisor.start_child(Eligenic.AgentSupervisor, {Eligenic.Agent, opts})
