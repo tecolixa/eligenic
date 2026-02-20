@@ -154,3 +154,59 @@ By default, conversation history uses `ETS`. For persistent postgres memory:
 1. Implement `Eligenic.Security`.
 2. Connect it to your app's `Bodyguard` or Guardian system inside `authorize/3`. 
 3. Pass `security: MyApp.AuthSystem`.
+
+---
+
+## 5. Integrating with Phoenix.Presence
+
+Eligenic comes with a built-in `Eligenic.Presence.PG` tracker using native Erlang process groups, which works out-of-the-box. 
+
+However, if you are building a Phoenix application with LiveViews or Channels, you will likely want your Agents to show up natively in your existing websocket presence UI (e.g., an "Agents Online" sidebar). 
+
+This is trivially accomplished by implementing the `Eligenic.Presence` behaviour and passing it to the framework configuration!
+
+### Step A: Implement the Behaviour
+
+```elixir
+# lib/my_app/eligenic_phoenix_presence.ex
+defmodule MyApp.EligenicPhoenixPresence do
+  @behaviour Eligenic.Presence
+  
+  # Assumes you have standard Phoenix.Presence configured in your app
+  alias MyAppWeb.Presence
+
+  @topic "active_agents"
+
+  @impl true
+  def track(pid, metadata \\ %{}) do
+    # When an Eligenic Agent boots, hook it directly into Phoenix's tracker!
+    Presence.track(pid, @topic, metadata[:id], %{
+      online_at: System.system_time(:second),
+      status: :idle
+    })
+  end
+
+  @impl true
+  def list_active do
+    # Read the native Phoenix state
+    Presence.list(@topic)
+    |> Enum.map(fn {_id, %{metas: metas}} -> 
+         # Extract PIDs from the Phoenix tracker payload
+         List.first(metas).phx_ref 
+       end)
+  end
+end
+```
+
+### Step B: Configure the Framework
+
+Tell Eligenic to stop using the default `PG` tracker globally, and use your Phoenix tracker instead:
+
+```elixir
+# config/config.exs
+import Config
+
+config :eligenic, :presence, MyApp.EligenicPhoenixPresence
+```
+
+Now, every time you start an `Eligenic.Agent`, it immediately joins your Phoenix LiveView presence state, and your `Eligenic.Observer` queries will pull straight from the Phoenix topic!

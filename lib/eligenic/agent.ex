@@ -71,6 +71,10 @@ defmodule Eligenic.Agent do
 
     Logger.info("Initializing Agent #{agent.id} (Process: #{inspect(self())})")
 
+    # Enlist the agent in the global presence tracker
+    presence = Application.get_env(:eligenic, :presence, Eligenic.Presence.PG)
+    presence.track(self(), %{id: agent.id})
+
     # Load history from memory
     case agent.memory.get_history(agent.id) do
       {:ok, history} ->
@@ -85,6 +89,13 @@ defmodule Eligenic.Agent do
   # -----------------------------------------------------------------------------
   # GenServer Callbacks: Messaging
   # -----------------------------------------------------------------------------
+
+  @impl true
+  def handle_call(:get_stats, _from, agent) do
+    # Scrub the heavy history payload out of the stats dump
+    stats = Map.drop(agent, [:history])
+    {:reply, {:ok, stats}, agent}
+  end
 
   @impl true
   def handle_call(:get_history, _from, agent) do

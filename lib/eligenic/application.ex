@@ -28,6 +28,12 @@ defmodule Eligenic.Application do
         start: {:pg, :start_link, [:eligenic_broker_scope]}
       },
 
+      # Native Erlang Process Group scope for Eligenic.Observer cluster discovery
+      %{
+        id: :eligenic_cluster,
+        start: {:pg, :start_link, [:eligenic_cluster]}
+      },
+
       # Task supervisor for concurrent, isolated agent tasks
       {PartitionSupervisor, child_spec: Task.Supervisor, name: Eligenic.TaskSupervisors}
     ]
